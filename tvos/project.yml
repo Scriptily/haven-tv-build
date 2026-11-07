@@ -1,0 +1,79 @@
+name: Haven
+options:
+  bundleIdPrefix: local.haven
+  deploymentTarget:
+    tvOS: "26.0"
+targets:
+  Haven:
+    type: application
+    platform: tvOS
+    sources: [Haven, Shared]
+    info:
+      path: Haven/Info.plist
+      properties:
+        CFBundleDisplayName: Haven
+        CFBundleShortVersionString: "1.1"
+        CFBundleVersion: "48"
+        UILaunchScreen: {}
+        UIUserInterfaceStyle: Dark
+        UIRequiredDeviceCapabilities: [arm64]
+        NSLocalNetworkUsageDescription: Haven finds and talks to your Home Assistant on your home network.
+        NSBonjourServices: [_home-assistant._tcp]
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        CFBundleURLTypes:
+          - CFBundleURLName: local.haven.tv
+            CFBundleURLSchemes: [haven]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: local.haven.tv
+        ASSETCATALOG_COMPILER_APPICON_NAME: "App Icon & Top Shelf Image"
+        CODE_SIGN_ENTITLEMENTS: Haven/Haven.entitlements
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "3"
+        CODE_SIGNING_ALLOWED: "NO"
+        CODE_SIGNING_REQUIRED: "NO"
+        CODE_SIGN_IDENTITY: ""
+        ENABLE_BITCODE: "NO"
+    dependencies:
+      - target: HavenTopShelf
+        embed: true
+    scheme:
+      testTargets: [HavenTests]
+  HavenTopShelf:
+    type: app-extension
+    platform: tvOS
+    sources: [HavenTopShelf, Shared]
+    info:
+      path: HavenTopShelf/Info.plist
+      properties:
+        CFBundleDisplayName: Haven
+        CFBundleShortVersionString: "1.1"
+        CFBundleVersion: "48"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.tv-top-shelf
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ContentProvider
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: local.haven.tv.topshelf
+        CODE_SIGN_ENTITLEMENTS: HavenTopShelf/HavenTopShelf.entitlements
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "3"
+        CODE_SIGNING_ALLOWED: "NO"
+        CODE_SIGNING_REQUIRED: "NO"
+        CODE_SIGN_IDENTITY: ""
+  HavenTests:
+    type: bundle.unit-test
+    platform: tvOS
+    sources: [HavenTests]
+    dependencies:
+      - target: Haven
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: "YES"
+        PRODUCT_BUNDLE_IDENTIFIER: local.haven.tv.tests
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "3"
+        CODE_SIGNING_ALLOWED: "NO"
+        CODE_SIGNING_REQUIRED: "NO"
+        CODE_SIGN_IDENTITY: ""
