@@ -1,0 +1,94 @@
+name: tvOS build
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: xcode-27
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - name: Xcode 27 (tvOS 27 SDK)
+        run: |
+          X=$(ls -d /Applications/Xcode_27*.app /Applications/Xcode.app 2>/dev/null | grep -m1 -E "Xcode_27|Xcode.app")
+          if [ -z "$X" ]; then echo "::error::no Xcode 27 on this runner image"; exit 1; fi
+          sudo xcode-select -s "$X"
+          xcodebuild -version
+          xcrun simctl list runtimes | grep -i tvos || true
+          brew install xcodegen
+      - name: Generate project
+        working-directory: tvos
+        run: xcodegen generate
+      - name: Pick a simulator
+        run: |
+          xcrun simctl list devicetypes -j > types.json
+          xcrun simctl list runtimes -j > rts.json
+          python3 - <<'EOF' >> "$GITHUB_ENV"
+          import json, re, subprocess, sys
+          types = {t['name']: t['identifier'] for t in json.load(open('types.json'))['devicetypes']}
+          rts = [r for r in json.load(open('rts.json'))['runtimes'] if r.get('platform') == 'tvOS' and r.get('isAvailable')]
+          ver = lambda r: [int(n) for n in re.findall(r'\d+', r['version'])]
+          rt = sorted(rts, key=ver)[-1]
+          ok = {d['identifier'] for d in rt.get('supportedDeviceTypes', [])}
+          name = next((n for n in sorted(types, reverse=True) if n.startswith('Apple TV 4K') and types[n] in ok), None) \
+              or next(n for n in types if n.startswith('Apple TV') and types[n] in ok)
+          udid = subprocess.check_output(['xcrun', 'simctl', 'create', 'Haven TV', types[name], rt['identifier']]).decode().strip()
+          print(f"SIM={udid}"); print(f"SIM_NAME={name}"); print(f"RUNTIME={rt['identifier']}")
+          EOF
+          grep -E "SIM|RUNTIME" "$GITHUB_ENV"
+      - name: Build for testing
+        working-directory: tvos
+        timeout-minutes: 20
+        run: |
+          xcrun simctl boot "$SIM" || true
+          set -o pipefail
+          xcodebuild build-for-testing -project Haven.xcodeproj -scheme Haven -destination "id=$SIM" \
+            -derivedDataPath "$PWD/dd" CODE_SIGNING_ALLOWED=NO 2>&1 | tee bft.log | grep -E "error:|warning: .*deprecated|BUILD (SUCCEEDED|FAILED)"
+          xcrun simctl bootstatus "$SIM" -b
+      - name: Unit tests (simulator)
+        working-directory: tvos
+        timeout-minutes: 10
+        run: |
+          set -o pipefail
+          xcodebuild test-without-building -project Haven.xcodeproj -scheme Haven -destination "id=$SIM" -only-testing:HavenTests \
+            -derivedDataPath "$PWD/dd" CODE_SIGNING_ALLOWED=NO 2>&1 | tee test.log | grep -E "Test Case .*(passed|failed)|error:|Executed|TEST (EXECUTE )?(SUCCEEDED|FAILED)"
+      - name: Build (unsigned, device)
+        working-directory: tvos
+        timeout-minutes: 15
+        run: |
+          set -o pipefail
+          xcodebuild -project Haven.xcodeproj -scheme Haven -configuration Release \
+            -sdk appletvos -destination 'generic/platform=tvOS' \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            SYMROOT="$PWD/build" build 2>&1 | tee build.log | grep -E "error:|warning: .*(deprecated|unavailable)|BUILD (SUCCEEDED|FAILED)" || true
+          test -d build/Release-appletvos/Haven.app
+      - name: Entitlements (ad-hoc signature - the signer on the PC reads them and registers the App Group)
+        working-directory: tvos
+        run: |
+          APP=build/Release-appletvos/Haven.app
+          ls "$APP/PlugIns"
+          for X in "$APP"/PlugIns/*.appex; do codesign --force --sign - --entitlements HavenTopShelf/HavenTopShelf.entitlements "$X"; done
+          codesign --force --sign - --entitlements Haven/Haven.entitlements "$APP"
+          codesign -d --entitlements - "$APP" 2>&1 | grep -A3 application-groups
+          codesign -d --entitlements - "$APP"/PlugIns/*.appex 2>&1 | grep -A3 application-groups
+      - name: Package .ipa
+        working-directory: tvos
+        run: |
+          mkdir -p Payload && cp -R build/Release-appletvos/Haven.app Payload/
+          zip -qry Haven.ipa Payload
+          ls -la Haven.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Haven-ipa
+          path: tvos/Haven.ipa
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: failure() || cancelled()
+        with:
+          name: build-log
+          path: |
+            tvos/build.log
+            tvos/bft.log
+            tvos/test.log
